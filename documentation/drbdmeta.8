@@ -1,0 +1,131 @@
+'\" t
+.\"     Title: drbdmeta
+.\"    Author: [see the "Author" section]
+.\" Generator: DocBook XSL Stylesheets v1.75.2 <http://docbook.sf.net/>
+.\"      Date: 15 Oct 2008
+.\"    Manual: System Administration
+.\"    Source: DRBD 8.3.2
+.\"  Language: English
+.\"
+.TH "DRBDMETA" "8" "15 Oct 2008" "DRBD 8.3.2" "System Administration"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+drbdmeta \- DRBD\*(Aqs meta data management tool .\" drbdmeta
+.SH "SYNOPSIS"
+.HP \w'\fBdrbdmeta\fR\ 'u
+\fBdrbdmeta\fR [\-\-force] [\-\-ignore\-sanity\-checks] {\fIdevice\fR} {v06\ \fIminor\fR | v07\ \fImeta_dev\ index\fR | v08\ \fImeta_dev\ index\fR} {\fIcommand\fR} [\fIcmd\ args\fR...]
+.SH "DESCRIPTION"
+.PP
+Drbdmeta is used to create, display and modify the contents of DRBD\*(Aqs meta data storage\&. Usually you do not want to use this command directly, but start it via the frontend
+\fBdrbdadm\fR(8)\&.
+.PP
+This command only works if the DRBD resource is currently down, or at least detached from its backing storage\&. The first parameter is the device node associated to the resource\&. With the second parameter you can select the version of the meta data\&. Currently all major DRBD releases (0\&.6, 0\&.7 and 8) are supported\&.
+.SH "OPTIONS"
+.PP
+\-\-force
+.RS 4
+.\" drbdmeta: --force
+All questions that get asked by drbdmeta are treated as if the user answered \*(Aqyes\*(Aq\&.
+.RE
+.PP
+\-\-ignore\-sanity\-checks
+.RS 4
+.\" drbdmeta: --ignore-sanity-checks
+Some sanity checks cause drbdmeta to terminate\&. E\&.g\&. if a file system image would get destroyed by creating the meta data\&. By using that option you can force drbdmeta to ignore these checks\&.
+.RE
+.SH "COMMANDS"
+.PP
+create\-md
+.RS 4
+.\" drbdmeta: create-md
+Create\-md initializes the meta data storage\&. This needs to be done before a DRBD resource can be taken online for the first time\&. In case there is already a meta data signature of an older format in place, drbdmeta will ask you if it should convert the older format to the selected format\&.
+.RE
+.PP
+get\-gi
+.RS 4
+.\" drbdmeta: get-gi
+Get\-gi shows a short textual representation of the data generation identifier\&. In version 0\&.6 and 0\&.7 these are generation counters, while in version 8 it is a set of UUIDs\&.
+.RE
+.PP
+show\-gi
+.RS 4
+.\" drbdmeta: show-gi
+Show\-gi prints a textual representation of the data generation identifiers including explanatory information\&.
+.RE
+.PP
+dump\-md
+.RS 4
+.\" drbdmeta: dump-md
+Dumps the whole contents of the meta data storage including the stored bit\-map and activity\-log in a textual representation\&.
+.RE
+.PP
+outdate
+.RS 4
+.\" drbdmeta: outdate
+Sets the outdated flag in the meta data\&. This is used by the peer node when it wants to become primary, but cannot communicate with the DRBD stack on this host\&.
+.RE
+.PP
+dstate
+.RS 4
+.\" drbdmeta: dstate
+Prints the state of the data on the backing storage\&. The output is always followed by \*(Aq/DUnknown\*(Aq since drbdmeta only looks at the local meta data\&.
+.RE
+.PP
+check\-resize
+.RS 4
+.\" drbdmeta: check-resize
+Examines the device size of a backing device, and it\*(Aqs last known device size, recorded in a file /var/lib/drbd/drbd\-minor\-??\&.lkbd\&. In case the size of the backing device changed, and the meta data can be found at the old position, it moves the meta data to the right position at the end of the block device\&.
+.RE
+.SH "EXPERT'S COMMANDS"
+.PP
+Drbdmeta allows you to modify the meta data as well\&. This is intentionally omitted for the command\*(Aqs usage output, since you should only use it if you really know what you are doing\&. By setting the generation identifiers to wrong values, you risk to overwrite your up\-to\-data data with an older version of your data\&.
+.PP
+set\-gi \fIgi\fR
+.RS 4
+.\" drbdmeta: set-gi
+Set\-gi allows you to set the generation identifier\&.
+\fIGi\fR
+needs to be a generation counter for the 0\&.6 and 0\&.7 format, and a UUID set for 8\&.x\&. Specify it in the same way as get\-gi shows it\&.
+.RE
+.PP
+restore\-md \fIdump_file\fR
+.RS 4
+.\" drbdmeta: restore-md
+Reads the
+\fIdump_file\fR
+and writes it to the meta data\&.
+.RE
+.SH "VERSION"
+.sp
+This document was revised for version 8\&.3\&.2 of the DRBD distribution\&.
+.SH "AUTHOR"
+.sp
+Written by Philipp Reisner philipp\&.reisner@linbit\&.com and Lars Ellenberg lars\&.ellenberg@linbit\&.com\&.
+.SH "REPORTING BUGS"
+.sp
+Report bugs to drbd\-user@lists\&.linbit\&.com\&.
+.SH "COPYRIGHT"
+.sp
+Copyright 2001\-2008 LINBIT Information Technologies, Philipp Reisner, Lars Ellenberg\&. This is free software; see the source for copying conditions\&. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE\&.
+.SH "SEE ALSO"
+.PP
+
+\fBdrbdadm\fR(8)

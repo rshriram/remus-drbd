@@ -1,0 +1,383 @@
+'\" t
+.\"     Title: drbdadm
+.\"    Author: [see the "Author" section]
+.\" Generator: DocBook XSL Stylesheets v1.75.2 <http://docbook.sf.net/>
+.\"      Date: 5 Dec 2008
+.\"    Manual: System Administration
+.\"    Source: DRBD 8.3.2
+.\"  Language: English
+.\"
+.TH "DRBDADM" "8" "5 Dec 2008" "DRBD 8.3.2" "System Administration"
+.\" -----------------------------------------------------------------
+.\" * Define some portability stuff
+.\" -----------------------------------------------------------------
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.\" http://bugs.debian.org/507673
+.\" http://lists.gnu.org/archive/html/groff/2009-02/msg00013.html
+.\" ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.\" -----------------------------------------------------------------
+.\" * set default formatting
+.\" -----------------------------------------------------------------
+.\" disable hyphenation
+.nh
+.\" disable justification (adjust text to left margin only)
+.ad l
+.\" -----------------------------------------------------------------
+.\" * MAIN CONTENT STARTS HERE *
+.\" -----------------------------------------------------------------
+.SH "NAME"
+drbdadm \- Administration tool for DRBD .\" drbdadm
+.SH "SYNOPSIS"
+.HP \w'\fBdrbdadm\fR\ 'u
+\fBdrbdadm\fR [\-d] [\-c\ {\fIfile\fR}] [\-t\ {\fIfile\fR}] [\-s\ {\fIcmd\fR}] [\-m\ {\fIcmd\fR}] [\-S] [\-h\ {\fIhost\fR}] [\-\-\ {\fIbackend\-options\fR}] {\fIcommand\fR} [all | \fIresource\fR...]
+.SH "DESCRIPTION"
+.PP
+
+\fBDrbdadm\fR
+is the high level tool of the DRBD program suite\&.
+\fBDrbdadm\fR
+is to
+\fBdrbdsetup\fR
+and
+\fBdrbdmeta\fR
+what
+\fBifup\fR/\fBifdown\fR
+is to
+\fBifconfig\fR\&.
+\fBDrbdadm\fR
+reads its configuration file and performs the specified commands by calling the
+\fBdrbdsetup\fR
+and/or the
+\fBdrbdmeta\fR
+program\&.
+.SH "OPTIONS"
+.PP
+\fB\-d\fR, \fB\-\-dry\-run\fR
+.RS 4
+Just prints the calls of
+\fBdrbdsetup\fR
+to stdout, but does not run the commands\&.
+.RE
+.PP
+\fB\-c\fR, \fB\-\-config\-file\fR \fIfile\fR
+.RS 4
+Specifies the configuration file drbdadm will use\&. If this parameter is not specified, drbdadm will look for
+\fB/etc/drbd\-83\&.conf\fR,
+\fB/etc/drbd\-08\&.conf\fR
+and
+\fB/etc/drbd\&.conf\fR\&.
+.RE
+.PP
+\fB\-t\fR, \fB\-\-config\-to\-test\fR \fIfile\fR
+.RS 4
+Specifies an additional configuration file drbdadm to check\&. This option is only allowed with the dump and the sh\-nop commands\&.
+.RE
+.PP
+\fB\-s\fR, \fB\-\-drbdsetup\fR \fIfile\fR
+.RS 4
+Specifies the full path to the
+\fBdrbdsetup\fR
+program\&. If this option is omitted, drbdadm will look for
+\fB/sbin/drbdsetup\fR
+and
+\fB\&./drbdsetup\fR\&.
+.RE
+.PP
+\fB\-m\fR, \fB\-\-drbdmeta\fR \fIfile\fR
+.RS 4
+Specifies the full path to the
+\fBdrbdmeta\fR
+program\&. If this option is omitted, drbdadm will look for
+\fB/sbin/drbdmeta\fR
+and
+\fB\&./drbdmeta\fR\&.
+.RE
+.PP
+\fB\-S\fR, \fB\-\-stacked\fR
+.RS 4
+Specifies that this command should be performed on a stacked resource\&.
+.RE
+.PP
+\fB\-P\fR, \fB\-\-peer\fR
+.RS 4
+Specifies to which peer node to connect\&. Only necessary if there are more than two host sections in the resource you are working on\&.
+.RE
+.PP
+\fB\-\-\fR \fIbackend\-options\fR
+.RS 4
+All options following the doubly hyphen are considered
+\fIbackend\-options\fR\&. These are passed through to the backend command\&. I\&.e\&. to
+\fBdrbdsetup\fR,
+\fBdrbdmeta\fR
+or
+\fBdrbd\-proxy\-ctl\fR\&.
+.RE
+.SH "COMMANDS"
+.PP
+attach
+.RS 4
+Attaches a local backing block device to the DRBD resource\*(Aqs device\&.
+.RE
+.PP
+detach
+.RS 4
+.\" drbdadm: detach
+Removes the backing storage device from a DRBD resource\*(Aqs device\&.
+.RE
+.PP
+connect
+.RS 4
+.\" drbdadm: connect
+Sets up the network configuration of the resource\*(Aqs device\&. If the peer device is already configured, the two DRBD devices will connect\&. If there are more than two host sections in the resource you need to use the
+\fB\-\-peer\fR
+option to select the peer you want to connect to\&.
+.RE
+.PP
+disconnect
+.RS 4
+.\" drbdadm: disconnect
+Removes the network configuration from the resource\&. The device will then go into StandAlone state\&.
+.RE
+.PP
+syncer
+.RS 4
+.\" drbdadm: syncer
+Loads the resynchronization parameters into the device\&.
+.RE
+.PP
+up
+.RS 4
+.\" drbdadm: up
+Is a shortcut for attach and connect\&.
+.RE
+.PP
+down
+.RS 4
+.\" drbdadm: down
+Is a shortcut for disconnect and detach\&.
+.RE
+.PP
+primary
+.RS 4
+.\" drbdadm: primary
+Promote the resource\*(Aqs device into primary role\&. You need to do this before any access to the device, such as creating or mounting a file system\&.
+.RE
+.PP
+secondary
+.RS 4
+.\" drbdadm: secondary
+Brings the device back into secondary role\&. This is needed since in a connected DRBD device pair, only one of the two peers may have primary role (except if
+\fBallow\-two\-primaries\fR
+is explicitly set in the configuration file)\&.
+.RE
+.PP
+invalidate
+.RS 4
+.\" drbdadm: invalidate
+Forces DRBD to consider the data on the
+\fIlocal\fR
+backing storage device as out\-of\-sync\&. Therefore DRBD will copy each and every block from its peer, to bring the local storage device back in sync\&.
+.RE
+.PP
+invalidate\-remote
+.RS 4
+.\" drbdadm: invalidate-remote
+This command is similar to the invalidate command, however, the
+\fIpeer\*(Aqs\fR
+backing storage is invalidated and hence rewritten with the data of the local node\&.
+.RE
+.PP
+resize
+.RS 4
+.\" drbdadm: resize
+Causes DRBD to re\-examine all sizing constraints, and resize the resource\*(Aqs device accordingly\&. For example, if you increased the size of your backing storage devices (on both nodes, of course), then DRBD will adopt the new size after you called this command on one of your nodes\&. Since new storage space must be synchronised this command only works if there is at least one primary node present\&.
+.sp
+The
+\fB\-\-assume\-peer\-has\-space\fR
+allows you to resize a device which is currently not connected to the peer\&. Use with care, since if you do not resize the peer\*(Aqs disk as well, further connect attempts of the two will fail\&.
+.RE
+.PP
+check\-resize
+.RS 4
+.\" drbdadm: check-resize
+Calls drbdmeta to eventually move internal meta data\&. If the backing device was resized, while DRBD was not running, meta data has to be moved to the end of the device, so that the next
+\fBattach\fR
+command can succeed\&.
+.RE
+.PP
+create\-md
+.RS 4
+.\" drbdadm: create-md
+Initializes the meta data storage\&. This needs to be done before a DRBD resource can be taken online for the first time\&. In case of issues with that command have a look at
+\fBdrbdmeta\fR(8)
+.RE
+.PP
+get\-gi
+.RS 4
+.\" drbdadm: get-gi
+Shows a short textual representation of the data generation identifiers\&.
+.RE
+.PP
+show\-gi
+.RS 4
+.\" drbdadm: show-gi
+Prints a textual representation of the data generation identifiers including explanatory information\&.
+.RE
+.PP
+dump\-md
+.RS 4
+.\" drbdadm: dump-md
+Dumps the whole contents of the meta data storage, including the stored bit\-map and activity\-log, in a textual representation\&.
+.RE
+.PP
+outdate
+.RS 4
+.\" drbdadm: outdate
+Sets the outdated flag in the meta data\&.
+.RE
+.PP
+adjust
+.RS 4
+.\" drbdadm: adjust
+Synchronizes the configuration of the device with your configuration file\&. You should always examine the output of the dry\-run mode before actually executing this command\&.
+.RE
+.PP
+wait\-connect
+.RS 4
+.\" drbdadm: wait-connect
+Waits until the device is connected to its peer device\&.
+.RE
+.PP
+role
+.RS 4
+.\" drbdadm: role
+Shows the current roles of the devices (local/peer)\&. E\&.g\&. Primary/Secondary
+.RE
+.PP
+state
+.RS 4
+.\" drbdadm: state
+Deprecated alias for "role", see above\&.
+.RE
+.PP
+cstate
+.RS 4
+.\" drbdadm: cstate
+Shows the current connection state of the devices\&.
+.RE
+.PP
+status
+.RS 4
+.\" drbdadm: status
+Shows the current status of all devices defined in the current config file, in XML\-like format\&. Example output:
+.sp
+.if n \{\
+.RS 4
+.\}
+.nf
+<drbd\-status version="8\&.3\&.2" api="88">
+<resources config_file="/etc/drbd\&.conf">
+<resource minor="0" name="s0" cs="SyncTarget" st1="Secondary" st2="Secondary"
+          ds1="Inconsistent" ds2="UpToDate" resynced_precent="5\&.9" />
+<resource minor="1" name="s1" cs="WFConnection" st1="Secondary"
+          st2="Unknown" ds1="Inconsistent" ds2="Outdated" />
+<resource minor="3" name="dummy" cs="Unconfigured" />
+<!\-\- resource minor="4" name="scratch" not available or not yet created \-\->
+</resources>
+</drbd\-status>
+.fi
+.if n \{\
+.RE
+.\}
+.sp
+.RE
+.PP
+dump
+.RS 4
+.\" drbdadm: dump
+Just parse the configuration file and dump it to stdout\&. May be used to check the configuration file for syntactic correctness\&.
+.RE
+.PP
+outdate
+.RS 4
+.\" drbdadm: outdate
+Used to mark the node\*(Aqs data as outdated\&. Usually used by the peer\*(Aqs fence\-peer handler\&.
+.RE
+.PP
+verify
+.RS 4
+.\" drbdadm: verify
+Starts online verify\&. During online verify, data on both nodes is compared for equality\&. See
+/proc/drbd
+for online verify progress\&. If out\-of\-sync blocks are found, they are
+\fInot\fR
+resynchronized automatically\&. To do that,
+\fBdisconnect\fR
+and
+\fBconnect\fR
+the resource when verification has completed\&.
+.sp
+See also the notes on data integrity on the drbd\&.conf manpage\&.
+.RE
+.PP
+pause\-sync
+.RS 4
+.\" drbdadm: pause-sync
+Temporarily suspend an ongoing resynchronization by setting the local pause flag\&. Resync only progresses if neither the local nor the remote pause flag is set\&. It might be desirable to postpone DRBD\*(Aqs resynchronization until after any resynchronization of the backing storage\*(Aqs RAID setup\&.
+.RE
+.PP
+resume\-sync
+.RS 4
+.\" drbdadm: resume-sync
+Unset the local sync pause flag\&.
+.RE
+.PP
+new\-current\-uuid
+.RS 4
+.\" drbdadm: new-current-uuid
+Generates a new currend UUID and rotates all other UUID values\&.
+.sp
+This can be used to shorten the initial resync of a cluster\&. See the
+\fBdrbdsetup\fR
+manpage for a more details\&.
+.RE
+.PP
+dstate
+.RS 4
+.\" drbdadm: dstate
+Show the current state of the backing storage devices\&. (local/peer)
+.RE
+.PP
+hidden\-commands
+.RS 4
+Shows all commands undocumented on purpose\&.
+.RE
+.SH "VERSION"
+.sp
+This document was revised for version 8\&.3\&.2 of the DRBD distribution\&.
+.SH "AUTHOR"
+.sp
+Written by Philipp Reisner philipp\&.reisner@linbit\&.com and Lars Ellenberg lars\&.ellenberg@linbit\&.com
+.SH "REPORTING BUGS"
+.sp
+Report bugs to drbd\-user@lists\&.linbit\&.com\&.
+.SH "COPYRIGHT"
+.sp
+Copyright 2001\-2008 LINBIT Information Technologies, Philipp Reisner, Lars Ellenberg\&. This is free software; see the source for copying conditions\&. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE\&.
+.SH "SEE ALSO"
+.PP
+\fBdrbd.conf\fR(5),
+\fBdrbd\fR(8),
+\fBdrbddisk\fR(8),
+\fBdrbdsetup\fR(8),
+\fBdrbdmeta\fR(8)
+and the
+\m[blue]\fBDRBD project web site\fR\m[]\&\s-2\u[1]\d\s+2
+.SH "NOTES"
+.IP " 1." 4
+DRBD project web site
+.RS 4
+\%http://www.drbd.org/
+.RE
