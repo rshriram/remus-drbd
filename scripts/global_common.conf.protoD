@@ -1,0 +1,73 @@
+global {
+	usage-count no;
+	# minor-count dialog-refresh disable-ip-verification
+}
+
+common {
+        protocol D;
+	handlers {
+		pri-on-incon-degr "/usr/lib/drbd/notify-pri-on-incon-degr.sh";
+		pri-lost-after-sb "/usr/lib/drbd/notify-pri-lost-after-sb.sh";
+		local-io-error "/usr/lib/drbd/notify-io-error.sh";
+
+		##pri-on-incon-degr "/usr/lib/drbd/notify-pri-on-incon-degr.sh; /usr/lib/drbd/notify-emergency-reboot.sh; echo b > /proc/sysrq-trigger ; reboot -f";
+		##pri-lost-after-sb "/usr/lib/drbd/notify-pri-lost-after-sb.sh; /usr/lib/drbd/notify-emergency-reboot.sh; echo b > /proc/sysrq-trigger ; reboot -f";
+		##local-io-error "/usr/lib/drbd/notify-io-error.sh; /usr/lib/drbd/notify-emergency-shutdown.sh; echo o > /proc/sysrq-trigger ; halt -f";
+		# fence-peer "/usr/lib/drbd/crm-fence-peer.sh";
+		# split-brain "/usr/lib/drbd/notify-split-brain.sh root";
+		# out-of-sync "/usr/lib/drbd/notify-out-of-sync.sh root";
+		# before-resync-target "/usr/lib/drbd/snapshot-resync-target-lvm.sh -p 15 -- -c 16k";
+		# after-resync-target /usr/lib/drbd/unsnapshot-resync-target-lvm.sh;
+	}
+
+	startup {
+		# wfc-timeout degr-wfc-timeout outdated-wfc-timeout wait-after-sb
+                wfc-timeout 30;
+                degr-wfc-timeout 120;
+                outdated-wfc-timeout 10;		
+	}
+
+	disk {
+		# on-io-error fencing use-bmbv no-disk-barrier no-disk-flushes
+		# no-disk-drain no-md-flushes max-bio-bvecs
+                on-io-error pass_on;
+                fencing dont-care;
+	}
+
+	net {
+		# sndbuf-size rcvbuf-size timeout connect-int ping-int ping-timeout max-buffers
+		# max-epoch-size ko-count allow-two-primaries cram-hmac-alg shared-secret
+		# after-sb-0pri after-sb-1pri after-sb-2pri data-integrity-alg no-tcp-cork
+
+                # timeout       60;    #  6 seconds  (unit = 0.1 seconds)
+                # connect-int   10;    # 10 seconds  (unit = 1 second)
+                # ping-int      10;    # 10 seconds  (unit = 1 second)
+                # ping-timeout   5;    # 500 ms (unit = 0.1 seconds)
+                timeout         30;
+                ping-int        3;
+                ping-timeout    20;
+                max-buffers 8192;
+                unplug-watermark 4096;
+                max-epoch-size 4096;
+                ko-count 4;
+                allow-two-primaries;
+                after-sb-0pri discard-younger-primary;
+                after-sb-1pri discard-secondary;
+                after-sb-2pri disconnect;
+                rr-conflict disconnect;
+	}
+
+	syncer {
+		# rate after al-extents use-rle cpu-mask verify-alg csums-alg
+                al-extents 31; #124MB sync region
+                rate 100M;
+                verify-alg crc32c;
+                csums-alg crc32c;
+	    	#c-plan-ahead           10; # How long the controller should plan ahead  (unit = 0.1 seconds)
+	        #c-fill-target           0; # Aimed fill level. 0 to use c-delay-target  (unit = sectors)
+		#c-delay-target          6; # Aimed delay by the drbd-proxy's fill level (unit = 0.1 seconds)
+		#c-max-rate           100M; # Upper bound for the controller
+		#c-min-rate             4M; # below this rate, application IO will not cause extra throttling of resync
+	}
+}
+
