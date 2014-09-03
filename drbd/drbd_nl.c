@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -1414,11 +1417,16 @@ STATIC int drbd_nl_net_conf(struct drbd_conf *mdev, struct drbd_nl_cfg_req *nlp,
 	}
 
 	if (new_conf->two_primaries
-	    && (new_conf->wire_protocol != DRBD_PROT_C)) {
+		&& ((new_conf->wire_protocol != DRBD_PROT_C) &&
+			(new_conf->wire_protocol != DRBD_PROT_D))) {
 		retcode = ERR_NOT_PROTO_C;
 		goto fail;
 	}
 
+#if ENABLE_PROTD
+	if (new_conf->wire_protocol == DRBD_PROT_D)
+		mdev->checkpoints = 1;
+#endif
 	if (get_ldev(mdev)) {
 		enum drbd_fencing_p fp = mdev->ldev->dc.fencing;
 		put_ldev(mdev);

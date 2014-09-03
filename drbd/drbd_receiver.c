@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -257,6 +260,73 @@ static void drbd_kick_lo_and_reclaim_net(struct drbd_conf *mdev)
 		drbd_free_net_ee(mdev, e);
 }
 
+#if ENABLE_PROTD
+/* Remove epoch entries from the defer_ee list and release mdev refs, on failure */
+int drbd_remus_drain_ee(struct drbd_conf *mdev)
+{
+	/* 
+	 * TODO: Is there is a lot more to do in this function ?
+	 */
+	LIST_HEAD(work_list);
+	struct drbd_epoch_entry *e, *t;
+
+	spin_lock_irq(&mdev->req_lock);
+	list_splice_init(&mdev->defer_ee, &work_list);
+	spin_unlock_irq(&mdev->req_lock);
+
+	list_for_each_entry_safe(e, t, &work_list, w.list) {
+		drbd_free_ee(mdev, e);
+		put_ldev(mdev);
+	}
+	mdev->deferred = 0;
+	mdev->checkpoints = 0;
+	return true;
+}
+
+/* Move entries from defer_ee to active_ee and submit bios
+ * Need to take the req_lock (as we might have IO in flight).
+*/
+static int drbd_remus_schedule_deferred_ee(struct drbd_conf *mdev)
+{
+	struct drbd_epoch_entry *e;
+	struct list_head *le, *tle;
+	int rv = 0;
+
+	list_for_each_safe(le, tle, &mdev->defer_ee) {
+		e = list_entry(le, struct drbd_epoch_entry, w.list);
+		atomic_inc(&e->epoch->active);
+
+		spin_lock_irq(&mdev->req_lock);
+	        list_move_tail(le, &mdev->active_ee);
+		spin_unlock_irq(&mdev->req_lock);
+
+		/* drbd_submit_ee currently fails for one reason only:
+		 * not being able to allocate enough bios.
+		 * TODO: letting completion handler queue more bios
+		 */		
+		if (drbd_submit_ee(mdev, e, e->bio_flags, DRBD_FAULT_DT_WR) != 0) {
+			/* This is our cue. We are running out of bios because we are
+			 * creating too many write requests in one go. So, put the
+			 * ee back into defer_ee and let io completion callbacks queue
+			 * rest.
+			 * TODO: implement the campaign promise stated above.
+			 */
+			list_move(&e->w.list, &mdev->defer_ee);
+			atomic_dec(&e->epoch->active);
+			/* If there are no more pending ee left, then we cant hope
+			 * to queue more deferred ee. (TODO: Resync case?)
+			 */
+			return -1;
+			break;
+		} else {
+			rv++;
+			mdev->deferred--;
+		}
+	}
+	return rv;
+}
+#endif
+
 /**
  * drbd_pp_alloc() - Returns @number pages, retries forever (or until signalled)
  * @mdev:	DRBD device.
@@ -382,6 +452,9 @@ struct drbd_epoch_entry *drbd_alloc_ee(struct drbd_conf *mdev,
 	e->sector = sector;
 	e->block_id = id;
 
+#if ENABLE_PROTD
+	e->bio_flags = 0;
+#endif
 	trace_drbd_ee(mdev, e, "allocated");
 	return e;
 
@@ -971,6 +1044,14 @@ retry:
 	clear_bit(RESIZE_PENDING, &mdev->flags);
 	mod_timer(&mdev->request_timer, jiffies + HZ); /* just start it here. */
 
+#if ENABLE_PROTD
+	if (mdev->net_conf->wire_protocol == DRBD_PROT_D) {
+		clear_bit(GOT_CHECKPOINT_ACK, &mdev->flags);
+		mdev->deferred = 0;
+		mdev->checkpoints = 1;
+	} else
+		mdev->checkpoints = 0;
+#endif
 	return 1;
 
 out_release_sockets:
@@ -1359,6 +1440,18 @@ STATIC int receive_Barrier(struct drbd_conf *mdev, enum drbd_packets cmd, unsign
 	int rv, issue_flush;
 	struct p_barrier *p = &mdev->data.rbuf.barrier;
 	struct drbd_epoch *epoch;
+#if ENABLE_PROTD
+	if (p->pad && (mdev->net_conf->wire_protocol == DRBD_PROT_D)) {
+		drbd_send_checkpoint_ack(mdev);
+		if (p->pad != mdev->checkpoints)
+			dev_warn(DEV, "checkpoint numbers mismatch:"
+				 " received %u, have %u\n", p->pad,
+				 mdev->checkpoints);
+		mdev->checkpoints++;
+		rv = drbd_remus_schedule_deferred_ee(mdev);
+		if (unlikely(rv < 0)) return false;
+	}
+#endif
 
 	inc_unacked(mdev);
 
@@ -1764,7 +1857,12 @@ STATIC int e_end_block(struct drbd_conf *mdev, struct drbd_work *w, int cancel)
 	}
 	/* we delete from the conflict detection hash _after_ we sent out the
 	 * P_WRITE_ACK / P_NEG_ACK, to get the sequence number right.  */
+#if !(ENABLE_PROTD)
 	if (mdev->net_conf->two_primaries) {
+#else
+	if (mdev->net_conf->two_primaries 
+	   	&& mdev->net_conf->wire_protocol != DRBD_PROT_D) {
+#endif
 		spin_lock_irq(&mdev->req_lock);
 		D_ASSERT(!hlist_unhashed(&e->collision));
 		hlist_del_init(&e->collision);
@@ -1902,6 +2000,12 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 	dp_flags = be32_to_cpu(p->dp_flags);
 	rw |= wire_flags_to_bio(mdev, dp_flags);
 
+#if ENABLE_PROTD
+	/* TODO: Handle the write-after-write in same epoch case using
+	 * the two_primary else loop below.
+	 */
+	e->bio_flags = rw;
+#endif
 	if (dp_flags & DP_MAY_SET_IN_SYNC)
 		e->flags |= EE_MAY_SET_IN_SYNC;
 
@@ -1918,6 +2022,10 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 	spin_lock(&mdev->epoch_lock);
 	e->epoch = mdev->current_epoch;
 	atomic_inc(&e->epoch->epoch_size);
+#if ENABLE_PROTD
+	if (mdev->net_conf->wire_protocol != DRBD_PROT_D 
+		|| mdev->state.role == R_SECONDARY)
+#endif
 	atomic_inc(&e->epoch->active);
 
 	if (mdev->write_ordering == WO_bio_barrier && atomic_read(&e->epoch->epoch_size) == 1) {
@@ -1946,7 +2054,12 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 	spin_unlock(&mdev->epoch_lock);
 
 	/* I'm the receiver, I do hold a net_cnt reference. */
+#if !(ENABLE_PROTD)
 	if (!mdev->net_conf->two_primaries) {
+#else
+	if (!mdev->net_conf->two_primaries
+	    || mdev->net_conf->wire_protocol == DRBD_PROT_D) {
+#endif
 		spin_lock_irq(&mdev->req_lock);
 	} else {
 		/* don't get the req_lock yet,
@@ -1959,7 +2072,8 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 		struct hlist_head *slot;
 		int first;
 
-		D_ASSERT(mdev->net_conf->wire_protocol == DRBD_PROT_C);
+		D_ASSERT((mdev->net_conf->wire_protocol == DRBD_PROT_C)
+			||(mdev->net_conf->wire_protocol == DRBD_PROT_D));
 		BUG_ON(mdev->ee_hash == NULL);
 		BUG_ON(mdev->tl_hash == NULL);
 
@@ -1972,7 +2086,7 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 		 *    node, the corresponding req had already been conflicting,
 		 *    and a conflicting req is never sent.
 		 *
-		 * Note: for two_primaries, we are protocol C,
+		 * Note: for two_primaries, we are protocol C/D,
 		 * so there cannot be any request that is DONE
 		 * but still on the transfer log.
 		 *
@@ -2075,6 +2189,13 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 		finish_wait(&mdev->misc_wait, &wait);
 	}
 
+#if ENABLE_PROTD
+	if (mdev->net_conf->wire_protocol == DRBD_PROT_D 
+		&& (mdev->state.role == R_PRIMARY)) {
+		list_add(&e->w.list, &mdev->defer_ee);
+		mdev->deferred++;
+	} else
+#endif
 	list_add(&e->w.list, &mdev->active_ee);
 	spin_unlock_irq(&mdev->req_lock);
 
@@ -2090,6 +2211,9 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 		drbd_send_ack(mdev, P_RECV_ACK, e);
 		break;
 	case DRBD_PROT_A:
+#if ENABLE_PROTD
+	case DRBD_PROT_D:
+#endif
 		/* nothing to do */
 		break;
 	}
@@ -2102,6 +2226,17 @@ STATIC int receive_Data(struct drbd_conf *mdev, enum drbd_packets cmd, unsigned 
 		drbd_al_begin_io(mdev, e->sector);
 	}
 
+#if ENABLE_PROTD
+	/* We have saved the ee in a list. When we get a checkpoint barrier,
+	 * all entries in the defer_ee list would be moved into
+	 * active_ee list and the submit_ee call will be made.
+	 * NOTE: mdev references are not released yet. So, if failure
+	 * occurs with non-empty defer_ee list, need to do put_ldev(mdev)
+	 */
+	if (mdev->net_conf->wire_protocol == DRBD_PROT_D
+		&& mdev->state.role == R_PRIMARY)
+		return true;
+#endif
 	if (drbd_submit_ee(mdev, e, rw, DRBD_FAULT_DT_WR) == 0)
 		return true;
 
@@ -4144,6 +4279,13 @@ STATIC void drbd_disconnect(struct drbd_conf *mdev)
 	i = atomic_read(&mdev->pp_in_use_by_net);
 	if (i)
 		dev_info(DEV, "pp_in_use_by_net = %d, expected 0\n", i);
+#if ENABLE_PROTD
+	/*
+	 * Need to release the ee's in defer_ee list.
+	 * TODO: Make sure that no entry in defer ee list needs to go to disk.
+	 */
+	drbd_remus_drain_ee(mdev);
+#endif
 	i = atomic_read(&mdev->pp_in_use);
 	if (i)
 		dev_info(DEV, "pp_in_use = %d, expected 0\n", i);
@@ -4495,6 +4637,17 @@ STATIC int got_PingAck(struct drbd_conf *mdev, struct p_header80 *h)
 	return true;
 }
 
+#if ENABLE_PROTD
+STATIC int got_CheckpointAck(struct drbd_conf *mdev, struct p_header80 *h)
+{
+	/* wake up the proc sitting on ioctl */
+	int i;
+	i = test_and_set_bit(GOT_CHECKPOINT_ACK, &mdev->flags);
+	wake_up_interruptible(&mdev->misc_wait);
+	return true;
+}
+#endif
+
 STATIC int got_IsInSync(struct drbd_conf *mdev, struct p_header80 *h)
 {
 	struct p_block_ack *p = (struct p_block_ack *)h;
@@ -4787,6 +4940,9 @@ static struct asender_cmd *get_asender_cmd(int cmd)
 	[P_STATE_CHG_REPLY] = { sizeof(struct p_req_state_reply), got_RqSReply },
 	[P_RS_IS_IN_SYNC]   = { sizeof(struct p_block_ack), got_IsInSync },
 	[P_DELAY_PROBE]     = { sizeof(struct p_delay_probe93), got_skip },
+#if ENABLE_PROTD
+	[P_CHECKPOINT_ACK]  = { sizeof(struct p_header80), got_CheckpointAck },
+#endif
 	[P_RS_CANCEL]       = { sizeof(struct p_block_ack), got_NegRSDReply},
 	[P_MAX_CMD]	    = { 0, NULL },
 	};

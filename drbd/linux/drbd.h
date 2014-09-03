@@ -8,6 +8,9 @@
   Copyright (C) 2001-2008, Philipp Reisner <philipp.reisner@linbit.com>.
   Copyright (C) 2001-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+  Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+  Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
   drbd is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
   the Free Software Foundation; either version 2, or (at your option)
@@ -52,6 +55,7 @@
 
 #endif
 
+#define ENABLE_PROTD 1
 
 enum drbd_io_error_p {
 	EP_PASS_ON, /* FIXME should the better be named "Ignore"? */
@@ -157,6 +161,9 @@ enum drbd_ret_code {
 #define DRBD_PROT_A   1
 #define DRBD_PROT_B   2
 #define DRBD_PROT_C   3
+#if ENABLE_PROTD
+#define DRBD_PROT_D   4
+#endif
 
 enum drbd_role {
 	R_UNKNOWN = 0,

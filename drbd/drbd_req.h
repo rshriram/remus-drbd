@@ -7,6 +7,9 @@
    Copyright (C) 2006-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
    Copyright (C) 2006-2008, Philipp Reisner <philipp.reisner@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    DRBD is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -325,6 +328,9 @@ extern void complete_master_bio(struct drbd_conf *mdev,
 extern void request_timer_fn(unsigned long data);
 extern void tl_restart(struct drbd_conf *mdev, enum drbd_req_event what);
 
+#if ENABLE_PROTD
+extern void queue_barrier(struct drbd_conf *mdev);
+#endif
 /* use this if you don't want to deal with calling complete_master_bio()
  * outside the spinlock, e.g. when walking some list on cleanup. */
 static inline int _req_mod(struct drbd_request *req, enum drbd_req_event what)

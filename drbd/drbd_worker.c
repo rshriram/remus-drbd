@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -1271,6 +1274,13 @@ int w_send_barrier(struct drbd_conf *mdev, struct drbd_work *w, int cancel)
 	if (!drbd_get_data_sock(mdev))
 		return 0;
 	p->barrier = b->br_number;
+#if ENABLE_PROTD
+	if (mdev->net_conf->wire_protocol == DRBD_PROT_D
+		&& mdev->state.peer == R_PRIMARY)
+		p->pad = b->cp_number;
+	else
+		p->pad = 0;
+#endif
 	/* inc_ap_pending was done where this was queued.
 	 * dec_ap_pending will be done in got_BarrierAck
 	 * or (on connection loss) in w_clear_epoch.  */

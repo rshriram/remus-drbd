@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -280,6 +283,12 @@ STATIC int drbd_seq_show(struct seq_file *seq, void *v)
 			   mdev->epochs,
 			   write_ordering_chars[mdev->write_ordering]
 			);
+#if ENABLE_PROTD
+			seq_printf(seq, " def:%d chkpt:%d",
+				   mdev->deferred,
+				   mdev->checkpoints);
+#endif
+
 			seq_printf(seq, " oos:%llu\n",
 				   Bit2KB((unsigned long long)
 					   drbd_bm_total_weight(mdev)));

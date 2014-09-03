@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 2, or (at your option)
@@ -807,6 +810,8 @@ static int conv_protocol(struct drbd_argument *ad, struct drbd_tag_list *tl, cha
 		prot=DRBD_PROT_B;
 	} else if (!strcmp(arg,"C") || !strcmp(arg,"c")) {
 		prot=DRBD_PROT_C;
+	} else if (!strcmp(arg,"D") || !strcmp(arg,"d")) {
+		prot=DRBD_PROT_D;
 	} else {
 		fprintf(stderr, "'%s' is no valid protocol.\n", arg);
 		return OTHER_ERROR;

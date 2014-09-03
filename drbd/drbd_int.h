@@ -7,6 +7,9 @@
   Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
   Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+  Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+  Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
   drbd is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
   the Free Software Foundation; either version 2, or (at your option)
@@ -349,9 +352,12 @@ enum drbd_packets {
 	/* P_CKPT_DISABLE_REQ    = 0x26, * currently reserved for protocol D */
 	P_DELAY_PROBE         = 0x27, /* is used on BOTH sockets */
 	P_OUT_OF_SYNC         = 0x28, /* Mark as out of sync (Outrunning), data socket */
-	P_RS_CANCEL           = 0x29, /* meta: Used to cancel RS_DATA_REQUEST packet by SyncSource */
+#if ENABLE_PROTD
+	P_CHECKPOINT_ACK      = 0x29,
+#endif
+	P_RS_CANCEL           = 0x2A, /* meta: Used to cancel RS_DATA_REQUEST packet by SyncSource */
 
-	P_MAX_CMD	      = 0x2A,
+	P_MAX_CMD             = 0x2B,
 	P_MAY_IGNORE	      = 0x100, /* Flag to test if (cmd > P_MAY_IGNORE) ... */
 	P_MAX_OPT_CMD	      = 0x101,
 
@@ -407,7 +413,10 @@ static inline const char *cmdname(enum drbd_packets cmd)
 		[P_RS_IS_IN_SYNC]	= "CsumRSIsInSync",
 		[P_COMPRESSED_BITMAP]   = "CBitmap",
 		[P_DELAY_PROBE]         = "DelayProbe",
-		[P_OUT_OF_SYNC]		= "OutOfSync",
+#if ENABLE_PROTD
+		[P_CHECKPOINT_ACK]      = "CheckpointAck",
+#endif
+		[P_OUT_OF_SYNC]         = "OutOfSync",
 		[P_MAX_CMD]	        = NULL,
 	};
 
@@ -865,6 +874,9 @@ struct drbd_tl_epoch {
 	struct drbd_tl_epoch *next; /* pointer to the next barrier */
 	unsigned int br_number;  /* the barriers identifier. */
 	int n_writes;	/* number of requests attached before this barrier */
+#if ENABLE_PROTD
+	unsigned int cp_number; /* checkpoint number */
+#endif
 };
 
 struct drbd_request;
@@ -924,6 +936,9 @@ struct drbd_epoch_entry {
 	struct page *pages;
 	atomic_t pending_bios;
 	unsigned int size;
+#if ENABLE_PROTD
+	int bio_flags;
+#endif
 	/* see comments on ee flag bits below */
 	unsigned long flags;
 	sector_t sector;
@@ -1010,6 +1025,9 @@ enum {
 	GOT_PING_ACK,		/* set when we receive a ping_ack packet, misc wait gets woken */
 	NEW_CUR_UUID,		/* Create new current UUID when thawing IO */
 	AL_SUSPENDED,		/* Activity logging is currently suspended. */
+#if ENABLE_PROTD
+	GOT_CHECKPOINT_ACK,     /* set when secondary acks checkpoint req */
+#endif
 	AHEAD_TO_SYNC_SOURCE,   /* Ahead -> SyncSource queued */
 };
 
@@ -1251,6 +1269,11 @@ struct drbd_conf {
 	struct list_head done_ee;   /* send ack */
 	struct list_head read_ee;   /* IO in progress (any read) */
 	struct list_head net_ee;    /* zero-copy network send in progress */
+#if ENABLE_PROTD
+	struct list_head defer_ee;  /* IO deferred until checkpoint barrier is received */
+	unsigned int checkpoints;
+	unsigned int deferred;
+#endif
 	struct hlist_head *ee_hash; /* is protected by req_lock! */
 	unsigned int ee_hash_s;
 
@@ -2214,6 +2237,22 @@ static inline int drbd_send_ping_ack(struct drbd_conf *mdev)
 	struct p_header80 h;
 	return drbd_send_cmd(mdev, USE_META_SOCKET, P_PING_ACK, &h, sizeof(h));
 }
+
+#if ENABLE_PROTD
+/* drbd_receiver.c */
+extern int drbd_remus_drain_ee(struct drbd_conf *mdev);
+/* checkpoint requests have to be sent on the data socket
+ * to ensure that previous write packets have arrived at receiver.
+ * Acks can use meta socket.
+ */
+static inline int drbd_send_checkpoint_ack(struct drbd_conf *mdev)
+{
+	struct p_header80 h;
+	if (mdev->state.conn < C_CONNECTED)
+	  return false;
+	return drbd_send_cmd(mdev, USE_META_SOCKET, P_CHECKPOINT_ACK, &h, sizeof(h));
+}
+#endif
 
 static inline void drbd_thread_stop(struct drbd_thread *thi)
 {

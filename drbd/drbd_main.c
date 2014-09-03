@@ -7,6 +7,9 @@
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
 
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
+
    Thanks to Carter Burden, Bart Grantham and Gennadiy Nerubayev
    from Logicworks, Inc. for making SDP replication support possible.
 
@@ -81,6 +84,15 @@ static int drbd_release(struct gendisk *gd, fmode_t mode);
 #else
 static int drbd_open(struct inode *inode, struct file *file);
 static int drbd_release(struct inode *inode, struct file *file);
+#endif
+#if ENABLE_PROTD
+#ifdef BD_OPS_USE_FMODE
+static int drbd_remus_ioctl(struct block_device *bdev, fmode_t mode,
+			    unsigned command, unsigned long argument);
+#else
+static int drbd_remus_ioctl(struct inode *inode, struct file *file,
+			    unsigned command, unsigned long argument);
+#endif
 #endif
 STATIC int w_after_state_ch(struct drbd_conf *mdev, struct drbd_work *w, int unused);
 STATIC void after_state_ch(struct drbd_conf *mdev, union drbd_state os,
@@ -177,6 +189,9 @@ STATIC const struct block_device_operations drbd_ops = {
 	.owner =   THIS_MODULE,
 	.open =    drbd_open,
 	.release = drbd_release,
+#if ENABLE_PROTD
+	.ioctl = drbd_remus_ioctl,
+#endif
 };
 
 #define ARRY_SIZE(A) (sizeof(A)/sizeof(A[0]))
@@ -265,6 +280,9 @@ void _tl_add_barrier(struct drbd_conf *mdev, struct drbd_tl_epoch *new)
 	new->next = NULL;
 	new->n_writes = 0;
 
+#if ENABLE_PROTD
+	new->cp_number = 0;
+#endif	
 	newest_before = mdev->newest_tle;
 	/* never send a barrier number == 0, because that is special-cased
 	 * when using TCQ for our write ordering code */
@@ -2908,7 +2926,7 @@ int drbd_send_dblock(struct drbd_conf *mdev, struct drbd_request *req)
 		ok = dgs == drbd_send(mdev, mdev->data.socket, dgb, dgs, 0);
 	}
 	if (ok) {
-		/* For protocol A, we have to memcpy the payload into
+		/* For protocol A/D, we have to memcpy the payload into
 		 * socket buffers, as we may complete right away
 		 * as soon as we handed it over to tcp, at which point the data
 		 * pages may become invalid.
@@ -2919,7 +2937,12 @@ int drbd_send_dblock(struct drbd_conf *mdev, struct drbd_request *req)
 		 * out ok after sending on this side, but does not fit on the
 		 * receiving side, we sure have detected corruption elsewhere.
 		 */
+#if ENABLE_PROTD
+		if ( (mdev->net_conf->wire_protocol == DRBD_PROT_A) || dgs
+		     || (mdev->net_conf->wire_protocol == DRBD_PROT_D))
+#else
 		if (mdev->net_conf->wire_protocol == DRBD_PROT_A || dgs)
+#endif
 			ok = _drbd_send_bio(mdev, req->master_bio);
 		else
 			ok = _drbd_send_zc_bio(mdev, req->master_bio);
@@ -3177,6 +3200,113 @@ static int drbd_release(struct inode *inode, struct file *file)
 }
 #endif
 
+#if ENABLE_PROTD
+
+/* Called by the ioctl function, with req->lock held,
+ * to create a new epoch object and clear the previously
+ * set CREATE_BARRIER flag (thus allowing the ioctl to 
+ * send a checkpoint pkt). Copied from drbd_make_request_common.
+ */
+static int allocate_barrier(struct drbd_conf *mdev)
+{
+	if (mdev->unused_spare_tle == NULL) {
+		mdev->unused_spare_tle = 
+			kmalloc(sizeof(struct drbd_tl_epoch), GFP_NOIO);
+		if (!mdev->unused_spare_tle) {
+			dev_err(DEV, "Failed to alloc barrier.\n");
+			return -ENOMEM;
+		}
+	}
+
+	if (test_and_clear_bit(CREATE_BARRIER, &mdev->flags)) {
+		_tl_add_barrier(mdev, mdev->unused_spare_tle);
+		mdev->unused_spare_tle = NULL;
+	}
+	return 0;
+
+}
+
+#define IOCTL_SEND_CHKPT 20
+#define IOCTL_WAIT_CHKPT_ACK 30
+
+#ifdef BD_OPS_USE_FMODE
+static int drbd_remus_ioctl(struct block_device *bdev, fmode_t mode,
+			    unsigned command, unsigned long argument)
+#else
+static int drbd_remus_ioctl(struct inode *inode, struct file *file,
+			unsigned command, unsigned long argument)
+#endif
+{
+#ifdef BD_OPS_USE_FMODE	
+	struct drbd_conf *mdev = bdev->bd_disk->private_data;
+#else
+	struct drbd_conf *mdev = inode->i_bdev->bd_disk->private_data;
+#endif
+	int i = 0;
+	if (!mdev || !mdev->net_conf
+	    || (mdev->net_conf->wire_protocol != DRBD_PROT_D))
+		return -EINVAL;
+
+	if (command == IOCTL_WAIT_CHKPT_ACK) goto wait_chkpt_ack;
+
+	spin_lock_irq(&mdev->req_lock);
+	/* Check again after spinlock. Paranoid. */
+	if (unlikely(
+		    (mdev->state.pdsk < D_CONSISTENT)
+		    || (mdev->state.conn < C_CONNECTED))) {
+		spin_unlock_irq(&mdev->req_lock);
+		return -EPROTO;
+	}
+	/*
+	 * Dont send a barrier/checkpoint unless there are any writes.
+	 * Saves RTT and the barrier ack mismatch issue.
+	 * NOTE: TODO: since spin lock is not taken, there could be a race
+	 * with another thread executing in queue_for_net_write. But it doesnt
+	 * matter, as this write is not acked to VM yet. (VERIFY. until then,
+	 * use spinlock.)
+	 */
+	if (!mdev->newest_tle->n_writes) {
+	  spin_unlock_irq(&mdev->req_lock);
+	  return 1;
+	}
+	clear_bit(GOT_CHECKPOINT_ACK, &mdev->flags);
+
+	mdev->newest_tle->cp_number = mdev->checkpoints;
+	queue_barrier(mdev);
+
+	spin_unlock_irq(&mdev->req_lock);
+	/* not waiting for chkpt ack. Will use another ioctl for that. stupid*/
+	return 0;
+
+wait_chkpt_ack:
+	if (!(test_bit(GOT_CHECKPOINT_ACK, &mdev->flags)
+	      || (mdev->state.conn < C_CONNECTED)
+	      || (mdev->state.pdsk < D_CONSISTENT)))
+		wait_event_interruptible_timeout(mdev->misc_wait,
+						test_bit(GOT_CHECKPOINT_ACK, &mdev->flags)
+						|| (mdev->state.conn < C_CONNECTED),
+						mdev->net_conf->ping_timeo*2*HZ/10);
+
+	if ((mdev->state.conn < C_CONNECTED)
+	    || (mdev->state.pdsk < D_CONSISTENT))
+		return -EPROTO;
+
+	if (test_and_clear_bit(GOT_CHECKPOINT_ACK, &mdev->flags)) {
+		mdev->checkpoints++;
+		i = 0;
+		spin_lock_irq(&mdev->req_lock);
+		if ((i = allocate_barrier(mdev)) < 0)
+			printk(KERN_DEBUG "chkpt %d: alloc barrier failed\n",
+				mdev->checkpoints);
+		spin_unlock_irq(&mdev->req_lock);
+
+		return i;
+	}
+
+	return -EPROTO;
+}
+#endif
+
 #ifdef blk_queue_plugged
 STATIC void drbd_unplug_fn(struct request_queue *q)
 {
@@ -3293,6 +3423,9 @@ void drbd_init_set_defaults(struct drbd_conf *mdev)
 	INIT_LIST_HEAD(&mdev->done_ee);
 	INIT_LIST_HEAD(&mdev->read_ee);
 	INIT_LIST_HEAD(&mdev->net_ee);
+#if ENABLE_PROTD
+	INIT_LIST_HEAD(&mdev->defer_ee);
+#endif
 	INIT_LIST_HEAD(&mdev->resync_reads);
 	INIT_LIST_HEAD(&mdev->data.work.q);
 	INIT_LIST_HEAD(&mdev->meta.work.q);
@@ -3387,6 +3520,11 @@ void drbd_mdev_cleanup(struct drbd_conf *mdev)
 	D_ASSERT(list_empty(&mdev->done_ee));
 	D_ASSERT(list_empty(&mdev->read_ee));
 	D_ASSERT(list_empty(&mdev->net_ee));
+#if ENABLE_PROTD
+	if(!list_empty(&mdev->defer_ee)) {
+		drbd_remus_drain_ee(mdev);
+	}
+#endif
 	D_ASSERT(list_empty(&mdev->resync_reads));
 	D_ASSERT(list_empty(&mdev->data.work.q));
 	D_ASSERT(list_empty(&mdev->meta.work.q));
@@ -3536,6 +3674,9 @@ static void drbd_release_ee_lists(struct drbd_conf *mdev)
 	rr = drbd_release_ee(mdev, &mdev->net_ee);
 	if (rr)
 		dev_err(DEV, "%d EEs in net list found!\n", rr);
+#if ENABLE_PROTD
+	drbd_remus_drain_ee(mdev);
+#endif
 }
 
 /* caution. no locking.

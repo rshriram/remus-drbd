@@ -6,6 +6,9 @@
    Copyright (C) 2001-2008, LINBIT Information Technologies GmbH.
    Copyright (C) 1999-2008, Philipp Reisner <philipp.reisner@linbit.com>.
    Copyright (C) 2002-2008, Lars Ellenberg <lars.ellenberg@linbit.com>.
+   
+   Copyright (C) 2011, Shriram Rajagopalan <rshriram@cs.ubc.ca>.
+   Copyright (C) 2012, Conor Winchcombe <conor.winchcombe@sap.com>.
 
    drbd is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -142,7 +145,10 @@ static void _req_is_done(struct drbd_conf *mdev, struct drbd_request *req, const
 	drbd_req_free(req);
 }
 
-static void queue_barrier(struct drbd_conf *mdev)
+#if !(ENABLE_PROTD)
+static
+#endif
+void queue_barrier(struct drbd_conf *mdev)
 {
 	struct drbd_tl_epoch *b;
 
@@ -183,6 +189,10 @@ static void _about_to_complete_local_write(struct drbd_conf *mdev,
 	if (mdev->state.conn >= C_CONNECTED &&
 	    (s & RQ_NET_SENT) != 0 &&
 	    req->epoch == mdev->newest_tle->br_number)
+#if ENABLE_PROTD
+          if (mdev->net_conf->wire_protocol != DRBD_PROT_D
+                  || !(mdev->state.peer == R_PRIMARY && mdev->state.role == R_PRIMARY))
+#endif
 		queue_barrier(mdev);
 
 	/* we need to do the conflict detection stuff,
@@ -458,6 +468,11 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 		 * and from w_read_retry_remote */
 		D_ASSERT(!(req->rq_state & RQ_NET_MASK));
 		req->rq_state |= RQ_NET_PENDING;
+#if ENABLE_PROTD
+                /*
+                 * We dont worry about acks here. see handed_over_to_network
+                 */
+#endif
 		inc_ap_pending(mdev);
 		break;
 
@@ -566,6 +581,10 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 		/* otherwise we may lose an unplug, which may cause some remote
 		 * io-scheduler timeout to expire, increasing maximum latency,
 		 * hurting performance. */
+#if ENABLE_PROTD
+                /* No unplug business for prot D. */
+                if (mdev->net_conf->wire_protocol != DRBD_PROT_D)
+#endif
 		set_bit(UNPLUG_REMOTE, &mdev->flags);
 
 		/* see drbd_make_request_common,
@@ -583,6 +602,10 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 		req->w.cb =  w_send_dblock;
 		drbd_queue_work(&mdev->data.work, &req->w);
 
+#if ENABLE_PROTD
+                if (mdev->net_conf->wire_protocol != DRBD_PROT_D
+                        || !(mdev->state.peer == R_PRIMARY && mdev->state.role == R_PRIMARY))
+#endif
 		/* close the epoch, in case it outgrew the limit */
 		if (mdev->newest_tle->n_writes >= mdev->net_conf->max_epoch_size)
 			queue_barrier(mdev);
@@ -600,6 +623,9 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 	case send_canceled:
 		/* treat it the same */
 	case send_failed:
+#if ENABLE_PROTD
+          /* TODO: Do something here, remote write failed! */
+#endif
 		/* real cleanup will be done from tl_clear.  just update flags
 		 * so it is no longer marked as on the worker queue */
 		req->rq_state &= ~RQ_NET_QUEUED;
@@ -614,7 +640,16 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 			atomic_add(req->size>>9, &mdev->ap_in_flight);
 
 		if (bio_data_dir(req->master_bio) == WRITE &&
+#if ENABLE_PROTD
+                    /*
+                     * PROT_D has characteristics of prot A. No need for acks.
+                     * assumes that data has reached remote "buffer".
+                     */
+                        (mdev->net_conf->wire_protocol == DRBD_PROT_A ||
+                                mdev->net_conf->wire_protocol == DRBD_PROT_D)) {
+#else
 		    mdev->net_conf->wire_protocol == DRBD_PROT_A) {
+#endif
 			/* this is what is dangerous about protocol A:
 			 * pretend it was successfully written on the peer. */
 			if (req->rq_state & RQ_NET_PENDING) {
@@ -744,6 +779,12 @@ int __req_mod(struct drbd_request *req, enum drbd_req_event what,
 		if (!(req->rq_state & RQ_WRITE))
 			break;
 
+#if ENABLE_PROTD
+                /*
+                 * TODO: Do something about the out of seq requests.
+                 * we dont need explicit ack for each write req do we?
+                 */
+#endif
 		if (req->rq_state & RQ_NET_PENDING) {
 			/* barrier came in before all requests have been acked.
 			 * this is bad, because if the connection is lost now,
@@ -1118,6 +1159,11 @@ static int drbd_fail_request_early(struct drbd_conf *mdev, int is_write)
 		return 1;
 	}
 
+#if ENABLE_PROTD
+        /* TODO: this is the point where you can trigger
+         * drbd disconnect like blktap2 (if needed)
+         */
+#endif
 	return 0;
 }
 
